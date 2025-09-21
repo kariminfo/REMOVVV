@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>أداة إزالة العناصر من الصور</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Cairo -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+            overscroll-behavior: none;
+        }
+        .canvas-container {
+            position: relative;
+            width: fit-content;
+            height: fit-content;
+            margin: auto;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            touch-action: none;
+        }
+        #mask-canvas {
+            cursor: none; /* Hide default cursor */
+        }
+        .brush-cursor {
+            position: absolute;
+            border: 2px solid white;
+            border-radius: 50%;
+            background-color: rgba(239, 68, 68, 0.5); /* red-500 with opacity */
+            box-shadow: 0 0 0 2px black;
+            pointer-events: none; /* Allows clicks to pass through */
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            display: none;
+        }
+        .drag-over {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3b82f6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-5xl bg-white rounded-2xl shadow-lg p-6">
+        <!-- Header -->
+        <div class="text-center mb-6">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800">أداة إزالة العناصر من الصور</h1>
+            <p class="text-gray-500 mt-2">1. ارفع الصورة. 2. حدد العنصر. 3. اضغط على زر المسح.</p>
+        </div>
+
+        <!-- Uploader -->
+        <div id="upload-container">
+            <label for="file-upload" id="drop-zone" class="relative block w-full h-64 border-2 border-dashed border-gray-300 rounded-lg text-center cursor-pointer hover:border-blue-500 transition-colors">
+                <div class="flex flex-col items-center justify-center h-full">
+                    <svg class="w-16 h-16 text-gray-400" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>
+                    <p class="mt-4 text-lg font-semibold text-gray-600">اسحب وأفلت صورتك هنا</p>
+                    <p class="text-gray-500">أو <span class="text-blue-600 font-medium">تصفح الملفات</span></p>
+                </div>
+                <input type="file" id="file-upload" class="hidden" accept="image/png, image/jpeg, image/webp">
+            </label>
+        </div>
+
+        <!-- Editor -->
+        <div id="editor-container" class="hidden">
+            <!-- Controls -->
+            <div class="bg-gray-50 p-4 rounded-lg mb-4 flex flex-col md:flex-row items-center justify-center gap-6">
+                <div class="flex items-center gap-3">
+                    <label for="brush-size" class="font-medium text-gray-700">حجم الفرشاة:</label>
+                    <input id="brush-size" type="range" min="5" max="100" value="30" class="w-48 cursor-pointer">
+                    <span id="brush-size-value" class="font-bold text-blue-600 w-8 text-center">30</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="erase-btn" class="bg-red-600 text-white font-bold py-2 px-5 rounded-lg hover:bg-red-700 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        مسح العنصر
+                    </button>
+                    <button id="download-btn" class="bg-green-600 text-white font-bold py-2 px-5 rounded-lg hover:bg-green-700 transition-all hidden">
+                        تنزيل الصورة
+                    </button>
+                    <button id="reset-btn" class="bg-gray-600 text-white font-bold py-2 px-5 rounded-lg hover:bg-gray-700 transition-all">
+                        البدء من جديد
+                    </button>
+                </div>
+            </div>
+
+            <!-- Canvas Area -->
+            <div id="canvas-wrapper" class="relative flex justify-center items-center bg-gray-200 rounded-lg p-2" style="min-height: 400px;">
+                <div id="loader" class="hidden flex-col items-center gap-4">
+                    <div class="loader"></div>
+                    <p class="text-gray-700 font-semibold">جاري المعالجة، قد يستغرق الأمر بعض الوقت...</p>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="image-canvas" class="rounded-lg shadow-md"></canvas>
+                    <canvas id="mask-canvas" class="rounded-lg"></canvas>
+                </div>
+                <div id="brush-cursor" class="brush-cursor"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Inpaint implementation based on https://github.com/norgeous/inpaint-js (MIT License)
+    // Simplified and adapted for this single-file use case.
+    const inpaint = {
+        scan: function(mask, width, height) {
+            const res = [];
+            const data = mask.data;
+            let i, j, k;
+
+            for (j = 0; j < height; ++j) {
+                for (i = 0; i < width; ++i) {
+                    k = (j * width + i) * 4;
+                    if (data[k] === 255 && data[k+1] === 0 && data[k+2] === 0) { // Red mask
+                        res.push({ x: i, y: j, neighbors: [], d: Infinity });
+                    }
+                }
+            }
+            return res;
+        },
+        solve: function(image, mask) {
+            const width = image.width;
+            const height = image.height;
+            const imgData = image.getContext('2d').getImageData(0, 0, width, height);
+            const maskData = mask.getContext('2d').getImageData(0, 0, width, height);
+            const toProcess = this.scan(maskData, width, height);
+            
+            if (toProcess.length === 0) return;
+
+            const data = imgData.data;
+            const boundary = [];
+
+            toProcess.forEach(p => {
+                for (let j = p.y - 1; j <= p.y + 1; ++j) {
+                    for (let i = p.x - 1; i <= p.x + 1; ++i) {
+                        if (i < 0 || i >= width || j < 0 || j >= height) continue;
+                        if (i === p.x && j === p.y) continue;
+                        
+                        const k = (j * width + i) * 4;
+                        const isMasked = maskData.data[k] === 255;
+                        if (!isMasked) {
+                            p.d = 0;
+                            boundary.push(p);
+                            return;
+                        }
+                    }
+                }
+            });
+            
+            // Dijkstra-like distance calculation
+            while (boundary.length > 0) {
+                const p = boundary.shift();
+                for (let j = p.y - 1; j <= p.y + 1; ++j) {
+                    for (let i = p.x - 1; i <= p.x + 1; ++i) {
+                        if (i < 0 || i >= width || j < 0 || j >= height) continue;
+                        if (i === p.x && j === p.y) continue;
+                        
+                        const neighbor = toProcess.find(n => n.x === i && n.y === j);
+                        if (neighbor) {
+                            const newDist = p.d + Math.sqrt((p.x - i) ** 2 + (p.y - j) ** 2);
+                            if (newDist < neighbor.d) {
+                                neighbor.d = newDist;
+                                boundary.push(neighbor);
+                            }
+                        }
+                    }
+                }
+            }
+
+            toProcess.sort((a, b) => b.d - a.d);
+            
+            toProcess.forEach(p => {
+                let r = 0, g = 0, b = 0, totalWeight = 0;
+                let iMin = Math.max(0, p.x - 5);
+                let iMax = Math.min(width - 1, p.x + 5);
+                let jMin = Math.max(0, p.y - 5);
+                let jMax = Math.min(height - 1, p.y + 5);
+
+                for (let j = jMin; j <= jMax; ++j) {
+                    for (let i = iMin; i <= iMax; ++i) {
+                        const k = (j * width + i) * 4;
+                        if (maskData.data[k] !== 255) {
+                            const dist = (p.x - i) ** 2 + (p.y - j) ** 2;
+                            if (dist < 0.1) continue;
+                            const weight = 1.0 / dist;
+                            r += data[k] * weight;
+                            g += data[k + 1] * weight;
+                            b += data[k + 2] * weight;
+                            totalWeight += weight;
+                        }
+                    }
+                }
+                
+                const k = (p.y * width + p.x) * 4;
+                if (totalWeight > 0) {
+                    data[k] = r / totalWeight;
+                    data[k + 1] = g / totalWeight;
+                    data[k + 2] = b / totalWeight;
+                }
+            });
+            
+            image.getContext('2d').putImageData(imgData, 0, 0);
+        }
+    };
+    
+    // UI Logic
+    const uploadContainer = document.getElementById('upload-container');
+    const dropZone = document.getElementById('drop-zone');
+    const fileUpload = document.getElementById('file-upload');
+    const editorContainer = document.getElementById('editor-container');
+    const imageCanvas = document.getElementById('image-canvas');
+    const maskCanvas = document.getElementById('mask-canvas');
+    const brushSizeSlider = document.getElementById('brush-size');
+    const brushSizeValue = document.getElementById('brush-size-value');
+    const eraseBtn = document.getElementById('erase-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const loader = document.getElementById('loader');
+    const canvasWrapper = document.getElementById('canvas-wrapper');
+    const brushCursor = document.getElementById('brush-cursor');
+
+    const imgCtx = imageCanvas.getContext('2d');
+    const maskCtx = maskCanvas.getContext('2d');
+    
+    let originalImage = null;
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    function handleFile(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            originalImage = new Image();
+            originalImage.onload = setupEditor;
+            originalImage.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function setupEditor() {
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 600;
+
+        let width = originalImage.width;
+        let height = originalImage.height;
+
+        if (width > height) {
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+            }
+        } else {
+            if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+            }
+        }
+
+        imageCanvas.width = maskCanvas.width = width;
+        imageCanvas.height = maskCanvas.height = height;
+
+        imgCtx.drawImage(originalImage, 0, 0, width, height);
+        maskCtx.clearRect(0, 0, width, height);
+
+        uploadContainer.classList.add('hidden');
+        editorContainer.classList.remove('hidden');
+        downloadBtn.classList.add('hidden');
+    }
+
+    function getMousePos(canvas, evt) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = evt.clientX || (evt.touches && evt.touches[0].clientX);
+        const clientY = evt.clientY || (evt.touches && evt.touches[0].clientY);
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    }
+
+    function draw(e) {
+        if (!isDrawing) return;
+        e.preventDefault();
+        const { x, y } = getMousePos(maskCanvas, e);
+
+        maskCtx.strokeStyle = 'red';
+        maskCtx.lineJoin = 'round';
+        maskCtx.lineCap = 'round';
+        maskCtx.lineWidth = brushSizeSlider.value;
+
+        maskCtx.beginPath();
+        maskCtx.moveTo(lastX, lastY);
+        maskCtx.lineTo(x, y);
+        maskCtx.stroke();
+
+        [lastX, lastY] = [x, y];
+    }
+    
+    function startDrawing(e) {
+        isDrawing = true;
+        const { x, y } = getMousePos(maskCanvas, e);
+        [lastX, lastY] = [x, y];
+    }
+
+    function stopDrawing() {
+        isDrawing = false;
+    }
+
+    function updateBrushCursor(e) {
+        const { x, y } = getMousePos(maskCanvas, e);
+        const size = brushSizeSlider.value + 'px';
+        brushCursor.style.width = size;
+        brushCursor.style.height = size;
+        brushCursor.style.left = e.clientX + 'px';
+        brushCursor.style.top = e.clientY + 'px';
+    }
+
+    function handleErase() {
+        loader.style.display = 'flex';
+        document.querySelector('.canvas-container').style.display = 'none';
+        eraseBtn.disabled = true;
+
+        setTimeout(() => {
+            inpaint.solve(imageCanvas, maskCanvas);
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height); // Clear mask after inpainting
+            loader.style.display = 'none';
+            document.querySelector('.canvas-container').style.display = 'block';
+            downloadBtn.classList.remove('hidden');
+            eraseBtn.disabled = false;
+        }, 100); // Timeout to allow UI to update
+    }
+
+    function handleDownload() {
+        const link = document.createElement('a');
+        link.download = 'edited-image.png';
+        link.href = imageCanvas.toDataURL();
+        link.click();
+    }
+    
+    function handleReset() {
+        originalImage = null;
+        fileUpload.value = '';
+        editorContainer.classList.add('hidden');
+        uploadContainer.classList.remove('hidden');
+    }
+
+    // Event Listeners
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
+    fileUpload.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+    brushSizeSlider.addEventListener('input', (e) => { brushSizeValue.textContent = e.target.value; });
+    
+    maskCanvas.addEventListener('mousedown', startDrawing);
+    maskCanvas.addEventListener('mousemove', draw);
+    maskCanvas.addEventListener('mouseup', stopDrawing);
+    maskCanvas.addEventListener('mouseout', stopDrawing);
+    
+    maskCanvas.addEventListener('touchstart', startDrawing, { passive: false });
+    maskCanvas.addEventListener('touchmove', draw, { passive: false });
+    maskCanvas.addEventListener('touchend', stopDrawing);
+
+    document.body.addEventListener('mousemove', updateBrushCursor);
+    maskCanvas.addEventListener('mouseenter', () => brushCursor.style.display = 'block');
+    maskCanvas.addEventListener('mouseleave', () => brushCursor.style.display = 'none');
+
+    eraseBtn.addEventListener('click', handleErase);
+    downloadBtn.addEventListener('click', handleDownload);
+    resetBtn.addEventListener('click', handleReset);
+    </script>
+</body>
+</html>
